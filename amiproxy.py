@@ -7,12 +7,12 @@ import pystrix
 import Queue
 import json
 from threading import Thread
-import logging
+from loggers import Logger
 from systemcall import SystemCall
 import time
 import re
 
-BIND_PORT=8123
+BIND_PORT=8128
 BIND_HOST="0.0.0.0"
 _HOST = '194.50.85.100'
 _USERNAME = 'admin'
@@ -44,10 +44,10 @@ class AMICore(object):
     calls_processor = None
     check_connection = None
     action_lookup = None
-    logger = logging.getLogger('GSMstat')
+    logger = None
 
     def __init__(self):
-        self._log_set("/usr/local/bin/amiproxy/debug.log" , "info")
+        self.logger = Logger("amiproxy")
         self.queue["share"] = MSGQueue("share")
         self.not_my_actions = Queue.Queue()
         self.calls_queue["later"] = Queue.Queue()
