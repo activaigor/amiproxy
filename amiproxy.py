@@ -1,5 +1,6 @@
 from SimpleXMLRPCServer import SimpleXMLRPCServer
 from SimpleXMLRPCServer import SimpleXMLRPCRequestHandler
+import ConfigParser
 from SocketServer import ThreadingMixIn
 import socket
 import sys
@@ -9,14 +10,9 @@ import json
 from threading import Thread
 from loggers import Logger
 from systemcall import SystemCall
+from connections import Connections
 import time
 import re
-
-BIND_PORT=8128
-BIND_HOST="0.0.0.0"
-_HOST = '194.50.85.100'
-_USERNAME = 'admin'
-_PASSWORD = 'FcnthbcrFlvby'
 
 #Originate result constants
 ORIGINATE_RESULT_REJECT = 1 #Remote hangup
@@ -46,7 +42,7 @@ class AMICore(object):
     action_lookup = None
     logger = None
 
-    def __init__(self):
+    def __init__(self, host, user, passwd):
         self.logger = Logger("amiproxy")
         self.queue["share"] = MSGQueue("share")
         self.not_my_actions = Queue.Queue()
@@ -56,15 +52,15 @@ class AMICore(object):
         self.registered_events = []
         self._manager = pystrix.ami.Manager()
         self._register_callbacks()
-        self.calls_processor = Thread(target = self._calls_processor)
-        self.calls_processor.start()
+        #self.calls_processor = Thread(target = self._calls_processor)
+        #self.calls_processor.start()
         self.check_connection = Thread(target = self._check_connection)
         self.check_connection.start()
         self.action_lookup = False
 
     def _check_socket(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = s.connect_ex((_HOST, 5038))
+        result = s.connect_ex((host, 5038))
         if result == 0:
             s.close()
             return True
@@ -76,11 +72,11 @@ class AMICore(object):
         while not self._check_socket():
             time.sleep(2)
         try:
-            self._manager.connect(_HOST)
+            self._manager.connect(host)
             challenge_response = self._manager.send_action(pystrix.ami.core.Challenge())
             if challenge_response and challenge_response.success:
                 action = pystrix.ami.core.Login(
-                    _USERNAME, _PASSWORD, challenge=challenge_response.result['Challenge']
+                    user, passwd, challenge=challenge_response.result['Challenge']
                 )
                 self._manager.send_action(action)
             else:
@@ -416,14 +412,31 @@ class ConnectionError(Error):
     """
 
 class AMIserver():
+
+    config = ConfigParser.ConfigParser()
+    bind_host = None
+    list_servers = None
+    threads = None
+
+    def __init__(self):
+        self.config.read("/home/activa/github/amiproxy/settings.ini")
+        self.bind_host = self.config.get("globals" , "bind_host")
+        self.list_servers = self.config.get("globals" , "list_servers").split(",")
+        self.threads = {}
+
     def run(self):
+        for server in self.list_servers:
+            conn = Connections(server)
+            self.threads[server] = Thread(target = self.__serve_forever, name = "ami_" + server, args = (
+                conn.ami_host, conn.ami_port, conn.ami_user, conn.ami_pass))
+            self.threads[server].start()
+
+    def __serve_forever(self, host, port, user, passwd):
         class RequestHandler(SimpleXMLRPCRequestHandler):
             rpc_paths = ('/RPC2',)
-
-        #server = SimpleXMLRPCServer((BIND_HOST , BIND_PORT) , logRequests=False , requestHandler=RequestHandler
-        server = MyXMLRPCServer((BIND_HOST , BIND_PORT) , logRequests=False , requestHandler=RequestHandler, allow_none=True)
+        server = MyXMLRPCServer((self.bind_host , int(port)) , logRequests=False , requestHandler=RequestHandler, allow_none=True)
         server.register_introspection_functions()
-        server.register_instance(AMICore())
+        server.register_instance(AMICore(host, user, passwd))
         server.serve_forever()
 
 if __name__ == '__main__':
