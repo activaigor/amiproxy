@@ -11,6 +11,7 @@ from threading import Thread
 from loggers import Logger
 from systemcall import SystemCall
 from connections import Connections
+from collections import namedtuple
 import time
 import re
 
@@ -41,9 +42,12 @@ class AMICore(object):
     check_connection = None
     action_lookup = None
     logger = None
+    options = None
 
     def __init__(self, host, user, passwd):
-        self.logger = Logger("amiproxy")
+        opts = namedtuple("opts", ['host','user','passwd'])
+        self.options = opts(host = host, user = user, passwd = passwd)
+        self.logger = Logger("amiproxy{0}".format(host.split('.')[-1]))
         self.queue["share"] = MSGQueue("share")
         self.not_my_actions = Queue.Queue()
         self.calls_queue["later"] = Queue.Queue()
@@ -60,7 +64,7 @@ class AMICore(object):
 
     def _check_socket(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = s.connect_ex((host, 5038))
+        result = s.connect_ex((self.options.host, 5038))
         if result == 0:
             s.close()
             return True
@@ -72,11 +76,11 @@ class AMICore(object):
         while not self._check_socket():
             time.sleep(2)
         try:
-            self._manager.connect(host)
+            self._manager.connect(self.options.host)
             challenge_response = self._manager.send_action(pystrix.ami.core.Challenge())
             if challenge_response and challenge_response.success:
                 action = pystrix.ami.core.Login(
-                    user, passwd, challenge=challenge_response.result['Challenge']
+                    self.options.user, self.options.passwd, challenge=challenge_response.result['Challenge']
                 )
                 self._manager.send_action(action)
             else:
@@ -436,7 +440,8 @@ class AMIserver():
             rpc_paths = ('/RPC2',)
         server = MyXMLRPCServer((self.bind_host , int(port)) , logRequests=False , requestHandler=RequestHandler, allow_none=True)
         server.register_introspection_functions()
-        server.register_instance(AMICore(host, user, passwd))
+        params = {'host' : host, 'user' : user, 'passwd' : passwd}
+        server.register_instance(AMICore(**params))
         server.serve_forever()
 
 if __name__ == '__main__':
